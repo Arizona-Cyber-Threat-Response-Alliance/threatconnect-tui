@@ -33,15 +33,6 @@ impl ThreatConnectClient {
     }
 
     fn sign(&self, method: &str, path_and_query: &str, timestamp: u64) -> Result<String, Box<dyn Error>> {
-        // Message format: "path?query:method:timestamp"
-        // Note: api_path should include the version, e.g., "/api/v3/indicators"
-        // The path_and_query passed here should be relative to the domain but include the full API path.
-        
-        // Wait, the python code:
-        // api_path=f"/api/v3{endpoint}"
-        // if query_string: message = f"{api_path}?{query_string}:{http_method}:{timestamp}"
-        // else: message = f"{api_path}:{http_method}:{timestamp}"
-        
         let message = format!("{}:{}:{}", path_and_query, method, timestamp);
         
         let mut mac = HmacSha256::new_from_slice(self.secret_key.as_bytes())?;
@@ -55,18 +46,10 @@ impl ThreatConnectClient {
     pub async fn get<T: DeserializeOwned>(&self, endpoint: &str, params: Option<&Vec<(&str, &str)>>) -> Result<T, Box<dyn Error>> {
         let mut url = format!("{}{}", self.base_url, endpoint);
         
-        // Construct query string manually to ensure control over encoding if needed,
-        // but using serde_urlencoded is safer.
-        // Python used safe='(),'.
-        // Let's use serde_urlencoded for now.
-        
         let mut query_string = String::new();
         if let Some(p) = params {
             if !p.is_empty() {
-                // We need to encode params
                 let encoded = serde_urlencoded::to_string(p)?;
-                // If python required safe '(),', we might need to decode them back?
-                // Standard URL encoding should be fine for most things.
                 query_string = encoded;
                 url = format!("{}?{}", url, query_string);
             }
@@ -76,7 +59,6 @@ impl ThreatConnectClient {
             .duration_since(UNIX_EPOCH)?
             .as_secs();
 
-        // The path used for signing MUST include /api/v3
         let api_path = format!("/api/v3{}", endpoint);
         let path_to_sign = if !query_string.is_empty() {
             format!("{}?{}", api_path, query_string)
@@ -97,14 +79,17 @@ impl ThreatConnectClient {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status();
+        let status = response.status();
+
+        if !status.is_success() {
             let text = response.text().await.unwrap_or_default();
             error!("API Error {}: {}", status, text);
             return Err(format!("API Error {}: {}", status, text).into());
         }
 
-        let parsed: T = response.json().await?;
+        let body_text = response.text().await?;
+        
+        let parsed: T = serde_json::from_str(&body_text)?;
         Ok(parsed)
     }
 }
