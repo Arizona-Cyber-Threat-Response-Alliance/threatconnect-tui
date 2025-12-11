@@ -244,6 +244,11 @@ impl App {
 }
 
 pub async fn run_app() -> Result<(), Box<dyn Error>> {
+    // Load and validate config before setting up the terminal
+    // This way, if config fails, we exit cleanly with a message to stdout
+    let config = crate::config::Config::load()?;
+    config.validate()?;
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -251,13 +256,7 @@ pub async fn run_app() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Load env vars
-    dotenv::dotenv().ok();
-    let access_id = std::env::var("TC_ACCESS_ID").unwrap_or_default();
-    let secret_key = std::env::var("TC_SECRET_KEY").unwrap_or_default();
-    let instance = std::env::var("TC_INSTANCE").unwrap_or_default();
-
-    let client = Arc::new(ThreatConnectClient::new(access_id, secret_key, instance));
+    let client = Arc::new(ThreatConnectClient::new(config.tc_access_id, config.tc_secret_key, config.tc_instance));
     let app = Arc::new(Mutex::new(App::new(client)));
 
     let res = run_loop(&mut terminal, app).await;
